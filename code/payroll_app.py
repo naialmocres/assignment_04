@@ -38,3 +38,52 @@ Test it: pytest tests/test_pipeline.py -k app
 #
 # What the page does NOT do: arithmetic on rows, cleaning, merging. If you find
 # yourself writing a loop or an apply here, that logic belongs in the package.
+
+import streamlit as st
+
+from payroll import build_payroll, load_employees, load_timesheet, payroll_export
+
+
+st.title("Salt City Coffee — Weekly Payroll")
+st.write("Upload this week's timesheet to calculate payroll and prepare the provider's CSV.")
+
+employees = load_employees()
+uploaded_timesheet = st.file_uploader(
+    "Upload the week's timesheet CSV",
+    type="csv",
+    key="timesheet",
+)
+
+if uploaded_timesheet is not None:
+    timesheet = load_timesheet(uploaded_timesheet)
+    payroll = build_payroll(timesheet, employees)
+    payroll_date = payroll["payroll_date"].iloc[0]
+    st.subheader(f"Pay period ending {payroll_date}")
+
+    employees_paid = payroll[payroll["pay_type"] != "unmatched"]
+    overtime_weeks = payroll[payroll["pay_type"] == "overtime"]
+    total_hours = payroll["hours_worked"].sum()
+    total_gross_pay = payroll["gross_pay"].sum()
+
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Employees paid", len(employees_paid))
+    metric_columns[1].metric("Total hours", f"{total_hours:g}")
+    metric_columns[2].metric("Total gross pay", f"${total_gross_pay:,.2f}")
+    metric_columns[3].metric("Overtime weeks", len(overtime_weeks))
+
+    unmatched = payroll[payroll["pay_type"] == "unmatched"]
+    if len(unmatched) > 0:
+        unmatched_ids = ", ".join(unmatched["employee_id"])
+        st.warning(f"These employee IDs are not on the roster: {unmatched_ids}")
+    else:
+        st.success("All timesheet employee IDs matched the roster.")
+
+    st.dataframe(payroll)
+    export = payroll_export(payroll)
+    st.download_button(
+        "Download payroll CSV for the provider",
+        data=export.to_csv(index=False),
+        file_name=f"payroll_{payroll_date}.csv",
+        mime="text/csv",
+        key="download",
+    )
